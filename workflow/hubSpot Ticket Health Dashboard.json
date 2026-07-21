@@ -1,0 +1,264 @@
+{
+  "name": "hubSpot Ticket Health Dashboard",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "34f50968-f3bd-4e96-bd05-02e1aa57574d",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "url": "https://api.hubapi.com/crm/v3/objects/tickets",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "20"
+            },
+            {
+              "name": "properties",
+              "value": "subject,hs_pipeline_stage,hs_ticket_priority,hs_ticket_category,createdate,closed_date"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        208,
+        0
+      ],
+      "id": "ea9e6773-dc12-4750-bee1-a30aff680876",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "mpiy9W6ZdyNQWh37",
+          "name": "Bearer Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nif (!input.results || !Array.isArray(input.results)) {\n  throw new Error('HubSpot response does not contain a results array');\n}\n\nreturn input.results.map(ticket => ({\n  json: {\n    hubspot_id: ticket.id,\n    subject: ticket.properties?.subject ?? null,\n    pipeline_stage: ticket.properties?.hs_pipeline_stage ?? null,\n    priority: ticket.properties?.hs_ticket_priority ?? null,\n    category: ticket.properties?.hs_ticket_category ?? null,\n    created_at: ticket.properties?.createdate ?? ticket.createdAt ?? null,\n    closed_at: ticket.properties?.closed_date ?? null,\n    updated_at: ticket.properties?.hs_lastmodifieddate ?? ticket.updatedAt ?? null,\n    archived: ticket.archived ?? false,\n    ticket_url: ticket.url ?? null\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "328004dd-ada5-4d6f-aa82-66621728a345",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "CREATE TABLE IF NOT EXISTS hubspot_tickets (\n    hubspot_id VARCHAR(50) PRIMARY KEY,\n    subject TEXT,\n    pipeline_stage TEXT,\n    priority TEXT,\n    category TEXT,\n    created_at TIMESTAMP,\n    closed_at TIMESTAMP,\n    updated_at TIMESTAMP,\n    archived BOOLEAN DEFAULT FALSE,\n    ticket_url TEXT,\n    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP\n);",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        832,
+        0
+      ],
+      "id": "40aa3937-5c1b-4d9c-a4e9-5a5a27c62c66",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "23t69B9ZGc8pk6vJ",
+          "name": "Postgres account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO hubspot_tickets (\n    hubspot_id,\n    subject,\n    pipeline_stage,\n    priority,\n    category,\n    created_at,\n    closed_at,\n    updated_at,\n    archived,\n    ticket_url\n)\nVALUES (\n    $1,\n    $2,\n    $3,\n    $4,\n    $5,\n    $6::timestamp,\n    NULLIF($7, 'null')::timestamp,\n    $8::timestamp,\n    $9::boolean,\n    $10\n)\nON CONFLICT (hubspot_id)\nDO UPDATE SET\n    subject = EXCLUDED.subject,\n    pipeline_stage = EXCLUDED.pipeline_stage,\n    priority = EXCLUDED.priority,\n    category = EXCLUDED.category,\n    created_at = EXCLUDED.created_at,\n    closed_at = EXCLUDED.closed_at,\n    updated_at = EXCLUDED.updated_at,\n    archived = EXCLUDED.archived,\n    ticket_url = EXCLUDED.ticket_url,\n    synced_at = CURRENT_TIMESTAMP;",
+        "options": {
+          "queryReplacement": "=1 {{$json.hubspot_id}}\n2 {{$json.subject}}\n3 {{$json.pipeline_stage}}\n4 {{$json.priority}}\n5 {{$json.category}}\n6 {{$json.created_at}}\n7 {{$json.closed_at}}\n8 {{$json.updated_at}}\n9 {{$json.archived}}\n10 {{$json.ticket_url}}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        624,
+        0
+      ],
+      "id": "0da19278-9880-496b-a0c5-7fe0e826bc81",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "23t69B9ZGc8pk6vJ",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    COUNT(*) AS total_tickets,\n    COUNT(*) FILTER (WHERE closed_at IS NULL) AS open_tickets,\n    COUNT(*) FILTER (WHERE closed_at IS NOT NULL) AS closed_tickets,\n    COUNT(*) FILTER (WHERE priority IS NULL) AS missing_priority\nFROM hubspot_tickets;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "d7aa3993-bd67-4f85-a2d5-79baeb36cf7c",
+      "name": "Execute a SQL query2",
+      "credentials": {
+        "postgres": {
+          "id": "23t69B9ZGc8pk6vJ",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    COUNT(*) AS total_tickets,\n    COUNT(*) FILTER (WHERE closed_at IS NULL) AS open_tickets,\n    COUNT(*) FILTER (WHERE closed_at IS NOT NULL) AS closed_tickets,\n    COUNT(*) FILTER (WHERE priority IS NULL) AS missing_priority,\n    COUNT(*) FILTER (WHERE category IS NULL) AS missing_category,\n    ROUND(\n        AVG(\n            EXTRACT(EPOCH FROM (COALESCE(closed_at, CURRENT_TIMESTAMP) - created_at))\n            / 86400\n        )::numeric,\n        2\n    ) AS average_ticket_age_days\nFROM hubspot_tickets;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1248,
+        0
+      ],
+      "id": "0d13985d-133c-46ae-b3a2-3e89af85b75c",
+      "name": "Ticket Health Summary",
+      "credentials": {
+        "postgres": {
+          "id": "23t69B9ZGc8pk6vJ",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    hubspot_id,\n    subject,\n    pipeline_stage,\n    priority,\n    created_at,\n    ROUND(\n        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - created_at))\n        / 86400,\n        2\n    ) AS age_days,\n    ticket_url\nFROM hubspot_tickets\nWHERE closed_at IS NULL\nORDER BY created_at ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1456,
+        0
+      ],
+      "id": "31745173-fb41-40fb-8aac-7c333db0a80a",
+      "name": "Open Ticket Details",
+      "credentials": {
+        "postgres": {
+          "id": "23t69B9ZGc8pk6vJ",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Ticket Health Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ticket Health Summary": {
+      "main": [
+        [
+          {
+            "node": "Open Ticket Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e8907c30-952b-43b7-b183-a46d1f895e75",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8ca295bd58af889938ba9cdd27fc929a4c8bd7ab9b0f3d971596215db35cf58b"
+  },
+  "id": "hsuL4doqaE2R85R2",
+  "tags": []
+}
