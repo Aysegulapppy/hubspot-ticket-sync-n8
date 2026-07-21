@@ -1,5 +1,5 @@
 {
-  "name": "hubSpot Ticket Health Dashboard",
+  "name": "HubSpot Ticket ETL",
   "nodes": [
     {
       "parameters": {},
